@@ -68,7 +68,8 @@ Use command:
 
 # Preview
 
-<img width="334" height="704" alt="create_ui" src="https://github.com/user-attachments/assets/05e29622-7daa-4a32-9cc1-acbb0adda596" />
+<img width="334" height="704" alt="create_ui" src="https://github.com/user-attachments/assets/05e29622-7daa-4a32-9cc1-acbb0adda596" /> <img width="569" height="1043" alt="recipie_build" src="https://github.com/user-attachments/assets/48f1d470-416a-4d8e-9029-81e86e710d91" />
+
 
 ---
 ## 📌 Notes
