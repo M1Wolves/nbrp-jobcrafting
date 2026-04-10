@@ -142,6 +142,67 @@ local function getRecipeImage(recipe)
     return nil
 end
 
+local function chooseItemOption(currentValue)
+    local searchInput = lib.inputDialog('Find Item', {
+        {
+            type = 'input',
+            label = 'Search',
+            description = 'Type something like co to match coffee and other ox_inventory items.',
+            required = false,
+            default = currentValue or ''
+        }
+    })
+
+    if not searchInput then
+        return nil
+    end
+
+    local response = lib.callback.await('nbrp_jobcrafting:searchItems', false, searchInput[1] or '')
+
+    if not response then
+        notify('Item search failed.', 'error')
+        return nil
+    end
+
+    local matches = response.items or {}
+
+    if #matches == 0 then
+        notify('No matching items found.', 'error')
+        return nil
+    end
+
+    local selectedItem
+    local menuId = ('nbrp_jobcrafting_item_results_%s'):format(GetGameTimer())
+    local options = {}
+
+    for index = 1, #matches do
+        local item = matches[index]
+
+        options[#options + 1] = {
+            title = item.label or item.value,
+            description = item.value,
+            image = item.image ~= '' and item.image or nil,
+            onSelect = function()
+                selectedItem = item.value
+            end
+        }
+    end
+
+    lib.registerContext({
+        id = menuId,
+        title = ('Matching Items (%s)'):format(response.total or #matches),
+        options = options
+    })
+
+    lib.showContext(menuId)
+
+    while lib.getOpenContextMenu() == menuId do
+        Wait(0)
+    end
+
+    return selectedItem
+end
+
 local function getNearestStation(maxDistance)
     local ped = cache.ped
     local coords = GetEntityCoords(ped)
@@ -159,6 +220,28 @@ local function getNearestStation(maxDistance)
     end
 
     return closestStation, closestDistance
+end
+
+local function getStationById(stationId)
+    return stations[stationId]
+end
+
+local function getRecipeById(stationId, recipeId)
+    local station = getStationById(stationId)
+
+    if not station then
+        return nil, nil, nil
+    end
+
+    for index = 1, #(station.recipes or {}) do
+        local recipe = station.recipes[index]
+
+        if recipe.id == recipeId then
+            return station, recipe, index
+        end
+    end
+
+    return station, nil, nil
 end
 
 local function pickPlacementCoords(prompt)
@@ -398,15 +481,13 @@ local function openEntryForm(existingEntry, title)
     local itemDefault = existingEntry and existingEntry.name or ''
     local countDefault = existingEntry and existingEntry.count or 1
 
+    local selectedItem = chooseItemOption(itemDefault)
+
+    if not selectedItem then
+        return
+    end
+
     local input = lib.inputDialog(title, {
-        {
-            type = 'select',
-            label = 'Item',
-            required = true,
-            searchable = true,
-            default = itemDefault,
-            options = builderData.items
-        },
         {
             type = 'number',
             label = 'Count',
@@ -421,8 +502,8 @@ local function openEntryForm(existingEntry, title)
     end
 
     return {
-        name = input[1],
-        count = math.floor(tonumber(input[2]) or 1)
+        name = selectedItem,
+        count = math.floor(tonumber(input[1]) or 1)
     }
 end
 
@@ -669,20 +750,9 @@ local function deleteStation(stationId)
 end
 
 openEntriesMenu = function(stationId, recipeId, entryType)
-    local station = stations[stationId]
-    if not station then
-        return
-    end
+    local station, recipe = getRecipeById(stationId, recipeId)
 
-    local recipe
-    for index = 1, #station.recipes do
-        if station.recipes[index].id == recipeId then
-            recipe = station.recipes[index]
-            break
-        end
-    end
-
-    if not recipe then
+    if not station or not recipe then
         return
     end
 
@@ -692,11 +762,17 @@ openEntriesMenu = function(stationId, recipeId, entryType)
             title = entryType == 'ingredients' and 'Add Ingredient' or 'Add Reward',
             icon = 'fas fa-plus',
             onSelect = function()
+                local currentStation, currentRecipe = getRecipeById(stationId, recipeId)
+                if not currentStation or not currentRecipe then
+                    notify('Recipe not found.', 'error')
+                    return
+                end
+
                 local newEntry = openEntryForm(nil, entryType == 'ingredients' and 'Add Ingredient' or 'Add Reward')
 
                 if newEntry then
-                    entries[#entries + 1] = newEntry
-                    if saveStation(station) then
+                    currentRecipe[entryType][#currentRecipe[entryType] + 1] = newEntry
+                    if saveStation(currentStation) then
                         openEntriesMenu(stationId, recipeId, entryType)
                     end
                 end
@@ -721,11 +797,17 @@ openEntriesMenu = function(stationId, recipeId, entryType)
                             title = 'Edit',
                             icon = 'fas fa-pen',
                             onSelect = function()
+                                local currentStation, currentRecipe = getRecipeById(stationId, recipeId)
+                                if not currentStation or not currentRecipe or not currentRecipe[entryType][entryIndex] then
+                                    notify('Entry not found.', 'error')
+                                    return
+                                end
+
                                 local updated = openEntryForm(entry, 'Edit Entry')
 
                                 if updated then
-                                    entries[entryIndex] = updated
-                                    if saveStation(station) then
+                                    currentRecipe[entryType][entryIndex] = updated
+                                    if saveStation(currentStation) then
                                         openEntriesMenu(stationId, recipeId, entryType)
                                     end
                                 end
@@ -735,8 +817,14 @@ openEntriesMenu = function(stationId, recipeId, entryType)
                             title = 'Delete',
                             icon = 'fas fa-trash',
                             onSelect = function()
-                                table.remove(entries, entryIndex)
-                                if saveStation(station) then
+                                local currentStation, currentRecipe = getRecipeById(stationId, recipeId)
+                                if not currentStation or not currentRecipe or not currentRecipe[entryType][entryIndex] then
+                                    notify('Entry not found.', 'error')
+                                    return
+                                end
+
+                                table.remove(currentRecipe[entryType], entryIndex)
+                                if saveStation(currentStation) then
                                     openEntriesMenu(stationId, recipeId, entryType)
                                 end
                             end
@@ -760,23 +848,9 @@ openEntriesMenu = function(stationId, recipeId, entryType)
 end
 
 openRecipeAdminMenu = function(stationId, recipeId)
-    local station = stations[stationId]
-    if not station then
-        return
-    end
+    local station, recipe, recipeIndex = getRecipeById(stationId, recipeId)
 
-    local recipe
-    local recipeIndex
-
-    for index = 1, #station.recipes do
-        if station.recipes[index].id == recipeId then
-            recipe = station.recipes[index]
-            recipeIndex = index
-            break
-        end
-    end
-
-    if not recipe then
+    if not station or not recipe then
         return
     end
 
@@ -789,8 +863,14 @@ openRecipeAdminMenu = function(stationId, recipeId)
                 title = 'Edit Recipe',
                 icon = 'fas fa-pen',
                 onSelect = function()
-                    openRecipeForm(station, recipe)
-                    if saveStation(station) then
+                    local currentStation, currentRecipe = getRecipeById(stationId, recipeId)
+                    if not currentStation or not currentRecipe then
+                        notify('Recipe not found.', 'error')
+                        return
+                    end
+
+                    openRecipeForm(currentStation, currentRecipe)
+                    if saveStation(currentStation) then
                         openRecipeAdminMenu(stationId, recipeId)
                     end
                 end
@@ -813,8 +893,14 @@ openRecipeAdminMenu = function(stationId, recipeId)
                 title = 'Delete Recipe',
                 icon = 'fas fa-trash',
                 onSelect = function()
-                    table.remove(station.recipes, recipeIndex)
-                    if saveStation(station) then
+                    local currentStation, _, currentRecipeIndex = getRecipeById(stationId, recipeId)
+                    if not currentStation or not currentRecipeIndex then
+                        notify('Recipe not found.', 'error')
+                        return
+                    end
+
+                    table.remove(currentStation.recipes, currentRecipeIndex)
+                    if saveStation(currentStation) then
                         openStationAdminMenu(stationId)
                     end
                 end
@@ -826,7 +912,7 @@ openRecipeAdminMenu = function(stationId, recipeId)
 end
 
 local function openRecipeListMenu(stationId)
-    local station = stations[stationId]
+    local station = getStationById(stationId)
     if not station then
         return
     end
@@ -836,9 +922,15 @@ local function openRecipeListMenu(stationId)
             title = 'Add Recipe',
             icon = 'fas fa-plus',
             onSelect = function()
-                openRecipeForm(station)
+                local currentStation = getStationById(stationId)
+                if not currentStation then
+                    notify('Station not found.', 'error')
+                    return
+                end
 
-                if saveStation(station) then
+                openRecipeForm(currentStation)
+
+                if saveStation(currentStation) then
                     openRecipeListMenu(stationId)
                 end
             end
@@ -870,7 +962,7 @@ local function openRecipeListMenu(stationId)
 end
 
 openStationAdminMenu = function(stationId)
-    local station = stations[stationId]
+    local station = getStationById(stationId)
     if not station then
         notify('Crafting station not found.', 'error')
         return
@@ -885,22 +977,34 @@ openStationAdminMenu = function(stationId)
                 title = 'Edit Details',
                 icon = 'fas fa-sliders',
                 onSelect = function()
-                    openStationSettingsForm(station)
+                    local currentStation = getStationById(stationId)
+                    if not currentStation then
+                        notify('Crafting station not found.', 'error')
+                        return
+                    end
+
+                    openStationSettingsForm(currentStation)
                 end
             },
             {
                 title = 'Move To Looked At Point',
                 icon = 'fas fa-location-arrow',
                 onSelect = function()
+                    local currentStation = getStationById(stationId)
+                    if not currentStation then
+                        notify('Crafting station not found.', 'error')
+                        return
+                    end
+
                     local selectedCoords = pickPlacementCoords('Aim where this crafting station should move, then press E.')
 
                     if not selectedCoords then
                         return
                     end
 
-                    station.coords = selectedCoords
+                    currentStation.coords = selectedCoords
 
-                    saveStation(station)
+                    saveStation(currentStation)
                 end
             },
             {
