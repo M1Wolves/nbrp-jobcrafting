@@ -407,6 +407,39 @@ local function getItemOptions()
     return options
 end
 
+local function getMatchingItemOptions(searchTerm)
+    local normalizedSearch = type(searchTerm) == 'string' and searchTerm:lower() or ''
+    local allItems = getItemOptions()
+    local startsWith = {}
+    local contains = {}
+
+    for index = 1, #allItems do
+        local item = allItems[index]
+        local label = (item.label or ''):lower()
+        local value = (item.value or ''):lower()
+
+        if normalizedSearch == '' then
+            startsWith[#startsWith + 1] = item
+        elseif label:find(normalizedSearch, 1, true) == 1 or value:find(normalizedSearch, 1, true) == 1 then
+            startsWith[#startsWith + 1] = item
+        elseif label:find(normalizedSearch, 1, true) or value:find(normalizedSearch, 1, true) then
+            contains[#contains + 1] = item
+        end
+    end
+
+    local matches = {}
+
+    for index = 1, #startsWith do
+        matches[#matches + 1] = startsWith[index]
+    end
+
+    for index = 1, #contains do
+        matches[#matches + 1] = contains[index]
+    end
+
+    return matches
+end
+
 local function getJobOptions()
     local options = {
         { value = '', label = 'Public' }
@@ -448,6 +481,25 @@ lib.callback.register('nbrp_jobcrafting:getBuilderData', function(source)
         stations = getStationList(),
         items = getItemOptions(),
         jobs = getJobOptions()
+    }
+end)
+
+lib.callback.register('nbrp_jobcrafting:searchItems', function(source, searchTerm)
+    if not isAdmin(source) then
+        return nil
+    end
+
+    local matches = getMatchingItemOptions(searchTerm)
+    local limited = {}
+    local maxResults = math.min(#matches, 100)
+
+    for index = 1, maxResults do
+        limited[#limited + 1] = matches[index]
+    end
+
+    return {
+        total = #matches,
+        items = limited
     }
 end)
 
