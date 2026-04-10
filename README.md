@@ -66,6 +66,11 @@ Use command:
 
 ---
 
+# Preview
+
+<img width="334" height="704" alt="create_ui" src="https://github.com/user-attachments/assets/05e29622-7daa-4a32-9cc1-acbb0adda596" />
+
+---
 ## 📌 Notes
 
 * Stations are saved in:
